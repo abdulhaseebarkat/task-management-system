@@ -1,0 +1,98 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --radius: 0.5rem;
+
+  --background: #f9f9f7;
+  --foreground: #0b0b0b;
+  --card: #fcfcfb;
+  --card-foreground: #0b0b0b;
+  --popover: #fcfcfb;
+  --popover-foreground: #0b0b0b;
+
+  --primary: #2a78d6;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f0ee;
+  --secondary-foreground: #0b0b0b;
+  --muted: #f1f0ee;
+  --muted-foreground: #898781;
+  --accent: #eef4fd;
+  --accent-foreground: #184f95;
+  --destructive: #d03b3b;
+  --destructive-foreground: #ffffff;
+
+  --border: rgba(11, 11, 11, 0.1);
+  --input: rgba(11, 11, 11, 0.14);
+  --ring: #2a78d6;
+
+  --success: #0ca30c;
+  --warning: #fab219;
+  --serious: #ec835a;
+}
+
+.dark {
+  --background: #0d0d0d;
+  --foreground: #ffffff;
+  --card: #1a1a19;
+  --card-foreground: #ffffff;
+  --popover: #1a1a19;
+  --popover-foreground: #ffffff;
+
+  --primary: #3987e5;
+  --primary-foreground: #ffffff;
+  --secondary: #232a38;
+  --secondary-foreground: #ffffff;
+  --muted: #232a38;
+  --muted-foreground: #c3c2b7;
+  --accent: #1c2333;
+  --accent-foreground: #9ec5f4;
+  --destructive: #e66767;
+  --destructive-foreground: #0d0d0d;
+
+  --border: rgba(255, 255, 255, 0.1);
+  --input: rgba(255, 255, 255, 0.16);
+  --ring: #3987e5;
+
+  --success: #0ca30c;
+  --warning: #fab219;
+  --serious: #ec835a;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-serious: var(--serious);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--background);
+  color: var(--foreground);
+}
