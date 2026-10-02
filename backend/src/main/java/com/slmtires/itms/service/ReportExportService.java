@@ -162,7 +162,7 @@ public class ReportExportService {
             }
             autosize(leaderboard, 5);
 
-            Sheet strikes = workbook.createSheet("Strike distribution");
+            Sheet strikes = workbook.createSheet("Points impact by extensions");
             writeRow(strikes, 0, header, "Level", "Count", "Percent");
             i = 1;
             for (StrikeDistributionSlice slice : report.strikeDistribution()) {
@@ -180,7 +180,7 @@ public class ReportExportService {
 
             addChartsSheet(workbook, "Charts", List.of(
                 Map.entry("Tasks Assigned vs. Completed, by Person", assignedVsCompletedChart(report.employeeAssigned(), report.employeeCompletion())),
-                Map.entry("Strike Distribution", strikeDonutChart(report.strikeDistribution())),
+                Map.entry("Points Impact by Deadline Extensions", strikeDonutChart(report.strikeDistribution())),
                 Map.entry("Team Efficiency Trend", ChartImageRenderer.monthlyBars(
                     report.teamEfficiencyTrend().stream().map(MonthlyRate::monthLabel).toList(),
                     report.teamEfficiencyTrend().stream().map(MonthlyRate::rate).toList()))
@@ -209,7 +209,7 @@ public class ReportExportService {
                 report.teamEfficiencyTrend().stream().map(MonthlyRate::monthLabel).toList(),
                 report.teamEfficiencyTrend().stream().map(MonthlyRate::rate).toList()), 400f));
 
-            document.add(sectionHeading("Strike Distribution"));
+            document.add(sectionHeading("Points Impact by Deadline Extensions"));
             document.add(chartImage(strikeDonutChart(report.strikeDistribution()), 320f));
         });
     }
@@ -438,8 +438,8 @@ public class ReportExportService {
     private String strikeLevelLabel(String level) {
         return switch (level) {
             case "0" -> "Full points";
-            case "1" -> "After 1st strike";
-            case "2" -> "After 2nd strike";
+            case "1" -> "After 1st deadline extension";
+            case "2" -> "After 2nd deadline extension";
             default -> "Failed";
         };
     }
@@ -447,8 +447,8 @@ public class ReportExportService {
     private String breakdownLabel(String level) {
         return switch (level) {
             case "FULL" -> "Full points";
-            case "STRIKE_1" -> "After 1st strike";
-            case "STRIKE_2" -> "After 2nd strike";
+            case "STRIKE_1" -> "After 1st deadline extension";
+            case "STRIKE_2" -> "After 2nd deadline extension";
             default -> "Failed";
         };
     }

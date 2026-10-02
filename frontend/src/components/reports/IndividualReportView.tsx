@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { Link } from "react-router-dom"
+import { Link, useSearchParams } from "react-router-dom"
 import { exportEmployeeReport, getEmployeeReport, type ExportFormat } from "@/api/reports"
 import { badgeClass, label, OVERDUE_BADGE_CLASS } from "@/components/tasks/taskDisplay"
 import { breakdownLabel, DivergingPointsBar, efficiencyTone, MonthlyRateBars, pointEventLabel, strikeLevelDotColor } from "@/components/reports/PointsCharts"
@@ -48,6 +48,18 @@ export function IndividualReportView({ employeeId }: { employeeId: number }) {
   const { from, to } = useMemo(() => presetRange(preset), [preset])
   const [error, setError] = useState<string | null>(null)
   const [exporting, setExporting] = useState<ExportFormat | null>(null)
+
+  // A "Due Date Extensions by Employee" dashboard chart can deep-link straight to just this
+  // person's extended tasks via ?onlyExtended=true - read once at mount, same pattern as every
+  // other deep-link param in this app, then cleared from the address bar.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [showOnlyExtended, setShowOnlyExtended] = useState(() => searchParams.get("onlyExtended") === "true")
+  useEffect(() => {
+    if (searchParams.has("onlyExtended")) {
+      setSearchParams((params) => { params.delete("onlyExtended"); return params }, { replace: true })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const query = useQuery({
     queryKey: ["reports", "employee", employeeId, from, to],
@@ -151,7 +163,7 @@ export function IndividualReportView({ employeeId }: { employeeId: number }) {
                 </Card>
               </div>
 
-              <Card title="Point Events" subtitle="Every strike, failure, and award — chronological, permanent once recorded">
+              <Card title="Point Events" subtitle="Every deadline extension, failure, and award — chronological, permanent once recorded">
                 {data.pointEvents.length === 0 ? (
                   <p className="text-xs text-muted-foreground">No points activity yet.</p>
                 ) : (
@@ -174,10 +186,21 @@ export function IndividualReportView({ employeeId }: { employeeId: number }) {
                 )}
               </Card>
 
-              <Card title="Individual Tasks" subtitle="Every task in this window, with its due-date history and points">
-                {data.taskDetails.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">No tasks in this window.</p>
-                ) : (
+              <Card
+                title="Individual Tasks"
+                subtitle={showOnlyExtended ? "Only tasks with an extended due date, this window" : "Every task in this window, with its due-date history and points"}
+              >
+                {showOnlyExtended && (
+                  <button onClick={() => setShowOnlyExtended(false)} className="mb-2 text-xs font-semibold text-primary">
+                    ← Show all tasks
+                  </button>
+                )}
+                {(() => {
+                  const taskDetails = showOnlyExtended ? data.taskDetails.filter((item) => item.dueDates.length > 1) : data.taskDetails
+                  if (taskDetails.length === 0) {
+                    return <p className="text-xs text-muted-foreground">{showOnlyExtended ? "No tasks with an extended due date in this window." : "No tasks in this window."}</p>
+                  }
+                  return (
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="text-left text-[11px] uppercase tracking-wide text-muted-foreground">
@@ -191,7 +214,7 @@ export function IndividualReportView({ employeeId }: { employeeId: number }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {data.taskDetails.map((item, i) => (
+                      {taskDetails.map((item, i) => (
                         <tr key={`${item.taskId}-${item.assignedAt}-${i}`} className="border-t border-border align-top">
                           <td className="py-2 pr-2">
                             <Link to={`${tasksBasePath}?taskId=${item.taskId}`} className="block min-w-0">
@@ -224,7 +247,8 @@ export function IndividualReportView({ employeeId }: { employeeId: number }) {
                       ))}
                     </tbody>
                   </table>
-                )}
+                  )
+                })()}
               </Card>
             </div>
           )}

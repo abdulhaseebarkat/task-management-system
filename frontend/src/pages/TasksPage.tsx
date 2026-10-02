@@ -28,7 +28,15 @@ export function TasksPage({ employee = false }: { employee?: boolean }) {
   const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
 
-  const [filters, setFilters] = useState<FilterValues>(DEFAULT_FILTERS)
+  // A dashboard chart (or any other deep link) can land here with ?status=/priority=/categoryId=/
+  // assigneeId= to pre-apply a filter - captured once from the initial URL, same as taskId below.
+  const [filters, setFilters] = useState<FilterValues>(() => ({
+    ...DEFAULT_FILTERS,
+    status: searchParams.get("status") ?? DEFAULT_FILTERS.status,
+    priority: searchParams.get("priority") ?? DEFAULT_FILTERS.priority,
+    categoryId: searchParams.get("categoryId") ?? DEFAULT_FILTERS.categoryId,
+    assigneeId: searchParams.get("assigneeId") ?? DEFAULT_FILTERS.assigneeId,
+  }))
   const [appliedSearch, setAppliedSearch] = useState("")
   const [page, setPage] = useState(0)
   const [view, setView] = useState<"active" | "archive">("active")
@@ -41,11 +49,19 @@ export function TasksPage({ employee = false }: { employee?: boolean }) {
   })
 
   // A Point Events link (or any other deep link) landed here with ?taskId=... - select it once, then
-  // drop the params so they don't fight with normal in-page selection afterward.
+  // drop the params so they don't fight with normal in-page selection afterward. The filter params
+  // above are read once at mount (in useState initializers), so they're cleared here too rather than
+  // left dangling in the address bar once applied.
   useEffect(() => {
     if (deepLinkedTaskId) {
       setSelectedId(Number(deepLinkedTaskId))
-      setSearchParams((params) => { params.delete("taskId"); params.delete("assignmentId"); return params }, { replace: true })
+    }
+    if (deepLinkedTaskId || searchParams.has("status") || searchParams.has("priority") || searchParams.has("categoryId") || searchParams.has("assigneeId")) {
+      setSearchParams((params) => {
+        params.delete("taskId"); params.delete("assignmentId")
+        params.delete("status"); params.delete("priority"); params.delete("categoryId"); params.delete("assigneeId")
+        return params
+      }, { replace: true })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deepLinkedTaskId])

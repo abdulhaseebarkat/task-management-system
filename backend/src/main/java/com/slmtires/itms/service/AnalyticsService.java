@@ -152,10 +152,12 @@ public class AnalyticsService {
         List<MonthlyRate> teamEfficiencyTrend = buildMonthlyRate(allPointsEvents);
         List<StrikeDistributionSlice> strikeDistribution = buildStrikeDistribution(allPointsEvents, startOfDay(from), startOfDay(to.plusDays(1)));
         List<AtRiskTaskItem> atRiskTasks = buildAtRiskTasks(liveOpen, allPointsEvents);
+        List<EmployeeCount> employeeDueDateExtensions = buildEmployeeDueDateExtensionCounts(createdInRange, employees());
+        List<EmployeeCount> employeeReassignedAway = buildEmployeeReassignedAwayCounts(employees(), startOfDay(from), startOfDay(to.plusDays(1)));
 
         return new DashboardAnalyticsResponse(from, to, summary, statusDistribution, teamWorkload,
             priorityDistribution, completionTrend, overdueTrend, employeeCompletion, employeeAssigned, categoryDistribution,
-            pointsLeaderboard, teamEfficiencyTrend, strikeDistribution, atRiskTasks);
+            pointsLeaderboard, teamEfficiencyTrend, strikeDistribution, atRiskTasks, employeeDueDateExtensions, employeeReassignedAway);
     }
 
     /**
@@ -461,6 +463,46 @@ public class AnalyticsService {
             .toList();
     }
 
+    /**
+     * Per employee, distinct tasks (among those passed in) that have had their due date extended by
+     * the Admin at least once - counted regardless of whether that particular extension had points
+     * deducted or not ("be it with deduction or without deduction"). A task extended more than once
+     * still only counts once. Attribution follows the same "ever an assignee" convention as
+     * {@link #buildEmployeeAssignedCounts} - a reassign-then-extend doesn't drop the original assignee.
+     */
+    private List<EmployeeCount> buildEmployeeDueDateExtensionCounts(List<Task> tasks, List<User> employees) {
+        Map<Long, Long> counts = new LinkedHashMap<>();
+        for (User employee : employees) {
+            counts.put(employee.getId(), 0L);
+        }
+        for (Task task : tasks) {
+            boolean extended = dueDateHistoryRepository.findByTaskIdOrderByChangedAtAsc(task.getId()).stream()
+                .anyMatch(h -> h.getPreviousDueDate() != null);
+            if (!extended) continue;
+            Set<Long> distinctAssigneeIds = task.getAssignments().stream().map(a -> a.getUser().getId()).collect(Collectors.toSet());
+            for (Long id : distinctAssigneeIds) {
+                if (counts.containsKey(id)) {
+                    counts.merge(id, 1L, Long::sum);
+                }
+            }
+        }
+        return employees.stream()
+            .map(employee -> new EmployeeCount(employee.getId(), employee.getName(), counts.get(employee.getId())))
+            .toList();
+    }
+
+    /**
+     * Per employee, how many times a task has been reassigned away from them (the "from" side) in
+     * [from, to) - mirrors {@code EmployeeReportResponse.Summary#reassignedAway}'s own definition,
+     * computed for every employee at once via the same repository count query.
+     */
+    private List<EmployeeCount> buildEmployeeReassignedAwayCounts(List<User> employees, Instant from, Instant to) {
+        return employees.stream()
+            .map(employee -> new EmployeeCount(employee.getId(), employee.getName(),
+                reassignmentHistoryRepository.countByFromUserIdAndCreatedAtBetween(employee.getId(), from, to)))
+            .toList();
+    }
+
     private List<User> employees() {
         return userRepository.findAllByRoleAndActiveTrueOrderByNameAsc(Role.TEAM_MEMBER);
     }
@@ -549,13 +591,13 @@ public class AnalyticsService {
     }
 
     /**
-     * earned ÷ (earned + lost) - of the points that have already been decided one way or another
-     * (banked via completion, or forfeited via a strike/failure), what fraction were kept. A pile of
-     * ordinary, still-open work contributes to neither side, so it never drags this down on its own.
+     * earned ÷ possible - of every point ever at stake (open tasks included, at their live value),
+     * what fraction has actually been banked so far. Per the Admin's explicit choice: a pile of
+     * ordinary, still-open work DOES lower this until it's actually completed - unlike the
+     * earned÷(earned+lost) alternative considered earlier, which this replaced.
      */
-    private int efficiencyRate(BigDecimal earned, BigDecimal lost) {
-        BigDecimal decided = earned.add(lost);
-        return decided.signum() == 0 ? 0 : Math.round(earned.divide(decided, 4, RoundingMode.HALF_UP).floatValue() * 100);
+    private int efficiencyRate(BigDecimal earned, BigDecimal possible) {
+        return possible.signum() == 0 ? 0 : Math.round(earned.divide(possible, 4, RoundingMode.HALF_UP).floatValue() * 100);
     }
 
     /** Every active team member is listed even at zero points, so a quiet employee doesn't vanish from the leaderboard. */
@@ -582,7 +624,7 @@ public class AnalyticsService {
                 BigDecimal earned = earnedByUser.get(employee.getId());
                 BigDecimal possible = possibleByUser.get(employee.getId());
                 BigDecimal lost = lostByUser.get(employee.getId());
-                return new PointsLeaderboardEntry(employee.getId(), employee.getName(), earned, possible, lost, efficiencyRate(earned, lost));
+                return new PointsLeaderboardEntry(employee.getId(), employee.getName(), earned, possible, lost, efficiencyRate(earned, possible));
             })
             .sorted(Comparator.comparingInt(PointsLeaderboardEntry::efficiencyRate).reversed())
             .toList();
@@ -599,10 +641,10 @@ public class AnalyticsService {
         List<LocalDate> monthStarts = new ArrayList<>();
         for (int i = 0; i < TREND_MONTHS; i++) monthStarts.add(trendStart.plusMonths(i));
         Map<LocalDate, BigDecimal> earned = new LinkedHashMap<>();
-        Map<LocalDate, BigDecimal> lost = new LinkedHashMap<>();
+        Map<LocalDate, BigDecimal> possible = new LinkedHashMap<>();
         for (LocalDate month : monthStarts) {
             earned.put(month, BigDecimal.ZERO);
-            lost.put(month, BigDecimal.ZERO);
+            possible.put(month, BigDecimal.ZERO);
         }
         for (TaskPointsEvent event : countable) {
             LocalDate month = event.getOccurredAt().atZone(ZoneOffset.UTC).toLocalDate().withDayOfMonth(1);
@@ -610,10 +652,10 @@ public class AnalyticsService {
             if (event.getEventType() == PointsEventType.COMPLETED) {
                 earned.merge(month, event.getResultingPoints(), BigDecimal::add);
             }
-            lost.merge(month, event.getBasePoints().subtract(event.getResultingPoints()), BigDecimal::add);
+            possible.merge(month, event.getBasePoints(), BigDecimal::add);
         }
         return monthStarts.stream()
-            .map(month -> new MonthlyRate(month.format(MONTH_LABEL), month, efficiencyRate(earned.get(month), lost.get(month))))
+            .map(month -> new MonthlyRate(month.format(MONTH_LABEL), month, efficiencyRate(earned.get(month), possible.get(month))))
             .toList();
     }
 
@@ -669,7 +711,7 @@ public class AnalyticsService {
         BigDecimal possible = countable.stream().map(TaskPointsEvent::getBasePoints).reduce(BigDecimal.ZERO, BigDecimal::add);
         BigDecimal lost = countable.stream().map(e -> e.getBasePoints().subtract(e.getResultingPoints())).reduce(BigDecimal.ZERO, BigDecimal::add);
         long failed = countable.stream().filter(e -> e.getEventType() == PointsEventType.FAILED).count();
-        return new EmployeeReportResponse.PointsSummary(earned, possible, lost, efficiencyRate(earned, lost), failed);
+        return new EmployeeReportResponse.PointsSummary(earned, possible, lost, efficiencyRate(earned, possible), failed);
     }
 
     private List<EmployeeReportResponse.PointsBreakdownRow> buildPointsBreakdown(List<TaskPointsEvent> events, Instant from, Instant to) {

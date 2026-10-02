@@ -48,7 +48,7 @@ export interface EmployeeReportSummary {
 /**
  * pointsEarned counts ONLY completed work; pointsPossible is live (open tasks included at full
  * value, the moment they're assigned); pointsLost is what's already been genuinely forfeited (open
- * or resolved). efficiencyRate = earned / (earned + lost) - unaffected by ordinary, still-open work.
+ * or resolved). efficiencyRate = earned / possible - still-open work lowers this until it's done.
  */
 export interface PointsSummary { pointsEarned: number; pointsPossible: number; pointsLost: number; efficiencyRate: number; tasksFailed: number }
 /** level is "FULL", "STRIKE_1", "STRIKE_2" or "FAILED". */

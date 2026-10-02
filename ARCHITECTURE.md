@@ -68,7 +68,7 @@ There are three ways into the same terminal `FAILED` outcome, all sharing one se
 - `pointsPossible` sums every event's `basePoints` - this is the number that shows up the instant a task is assigned, whether open or resolved.
 - `pointsEarned` sums `resultingPoints` from `COMPLETED` events only - an open task, however untouched, never contributes here.
 - `pointsLost` sums `basePoints - resultingPoints` across every event, open or resolved - a strike that's already landed on a still-open task counts immediately, without waiting for the task to finish.
-- `efficiencyRate = earned ÷ (earned + lost)` (`AnalyticsService#efficiencyRate`) - of the points already decided one way or the other, what fraction were kept, so a pile of ordinary open work never drags it down.
+- `efficiencyRate = earned ÷ possible` (`AnalyticsService#efficiencyRate`) - of everything ever at stake, including still-open work at its live value, what fraction has actually been banked. Reverted back to this from `earned ÷ (earned + lost)` per the Admin's explicit choice - ordinary open work is meant to lower this until it's actually completed, not be excluded from it.
 
 An open cycle's live `pointsLost` contribution and its eventual `COMPLETED` value are computed from the exact same numbers, so resolving a task never causes a jump - only a genuine strike, a failure, or the Fail action changes anything. A neutrally-closed cycle (`CANCELLED`, or `REASSIGNED` without the penalty) is excluded the moment it closes, dropping straight out of `pointsPossible` too, not just `pointsEarned`/`pointsLost`.
 

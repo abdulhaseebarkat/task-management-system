@@ -222,7 +222,7 @@ export function DepartmentReportView() {
                 </tbody>
               </table>
             </Card>
-            <Card title="Strike Distribution" subtitle={`Org-wide, ${from} to ${to} - open tasks included at their current standing`}>
+            <Card title="Points Impact by Deadline Extensions" subtitle={`Org-wide, ${from} to ${to} - open tasks included at their current standing`}>
               <table className="w-full text-xs">
                 <tbody>
                   {data.strikeDistribution.map((s) => (
@@ -242,4 +242,4 @@ export function DepartmentReportView() {
   )
 }
 
-const STRIKE_LABELS: Record<string, string> = { "0": "0 strikes — full points", "1": "1 strike — 50%", "2": "2 strikes — 25%", FAILED: "Failed (3 strikes)" }
+const STRIKE_LABELS: Record<string, string> = { "0": "No extensions — full points", "1": "1 extension — 50%", "2": "2 extensions — 25%", FAILED: "Failed (3rd extension)" }

@@ -68,13 +68,13 @@ export function MonthlyRateBars({ months }: { months: MonthlyRate[] }) {
 }
 
 const BREAKDOWN_LABELS: Record<string, string> = {
-  "0": "Full points (0 strikes)",
-  "1": "50% (1 strike)",
-  "2": "25% (2 strikes)",
-  FULL: "Full points (0 strikes)",
-  STRIKE_1: "50% (1 strike)",
-  STRIKE_2: "25% (2 strikes)",
-  FAILED: "Failed (3 strikes)",
+  "0": "Full points (no extensions)",
+  "1": "50% (1 deadline extension)",
+  "2": "25% (2 deadline extensions)",
+  FULL: "Full points (no extensions)",
+  STRIKE_1: "50% (1 deadline extension)",
+  STRIKE_2: "25% (2 deadline extensions)",
+  FAILED: "Failed (3rd deadline extension)",
 }
 
 export function breakdownLabel(level: string): string {
@@ -89,8 +89,8 @@ export function strikeLevelDotColor(level: string): string {
 }
 
 const EVENT_LABELS: Record<string, { text: string; tone: string }> = {
-  STRIKE_1: { text: "Strike 1 applied · −50%", tone: "text-serious" },
-  STRIKE_2: { text: "Strike 2 applied · −50% of remaining", tone: "text-destructive" },
+  STRIKE_1: { text: "1st deadline extension applied · −50%", tone: "text-serious" },
+  STRIKE_2: { text: "2nd deadline extension applied · −50% of remaining", tone: "text-destructive" },
   FAILED: { text: "Failed · 3rd deadline missed", tone: "text-destructive" },
   COMPLETED: { text: "Completed", tone: "text-success" },
   CANCELLED: { text: "Cancelled · excluded from scoring", tone: "text-muted-foreground" },
@@ -100,4 +100,57 @@ const EVENT_LABELS: Record<string, { text: string; tone: string }> = {
 
 export function pointEventLabel(eventType: string): { text: string; tone: string } {
   return EVENT_LABELS[eventType] ?? { text: eventType, tone: "text-muted-foreground" }
+}
+
+export interface EmployeePerformanceRow { employeeId: number; employeeName: string; pointsEarned: number; tasksCompleted: number }
+
+/** Flat fill, no gradient/shadow/icon - the leader gets the app's primary color, everyone else a neutral slate so rank still reads at a glance without any decoration. */
+const LEADER_COLOR = "#2a78d6"
+const BAR_COLOR = "#9aa0a6"
+const CHART_HEIGHT = 110
+
+/**
+ * "Employee Performance" - one bar per employee, ranked by points actually earned from completed
+ * work (resultingPoints of COMPLETED events only - the same accurate number as the Points
+ * Leaderboard, just ranked by raw points instead of efficiency rate, which is a genuinely different
+ * ordering: someone who finished a few small LOW-priority tasks cleanly can sit at 100% efficiency
+ * while earning far fewer points than someone who tackled bigger CRITICAL work with a strike or two).
+ * Plain HTML/CSS bars (no SVG viewBox) so value labels sit in normal document flow and can never be
+ * clipped, however tall the leading bar is.
+ */
+export function EmployeePerformanceChart({ rows, onSelect }: { rows: EmployeePerformanceRow[]; onSelect?: (employeeId: number) => void }) {
+  const sorted = [...rows].sort((a, b) => b.pointsEarned - a.pointsEarned)
+  const max = Math.max(...sorted.map((r) => r.pointsEarned), 1)
+
+  if (sorted.length === 0) {
+    return <p className="mt-3 text-xs text-muted-foreground">No completed tasks in this window.</p>
+  }
+
+  return (
+    <div className="flex items-end justify-center gap-4 overflow-x-auto px-2 pb-1 pt-6">
+      {sorted.map((row, i) => {
+        const color = i === 0 ? LEADER_COLOR : BAR_COLOR
+        const barHeight = row.pointsEarned <= 0 ? 3 : Math.max((row.pointsEarned / max) * CHART_HEIGHT, 4)
+        return (
+          <div
+            key={row.employeeId}
+            className={`flex w-[104px] flex-shrink-0 flex-col items-center rounded-md p-1 ${onSelect ? "cursor-pointer transition-colors hover:bg-accent" : ""}`}
+            onClick={onSelect ? () => onSelect(row.employeeId) : undefined}
+            title={onSelect ? `View ${row.employeeName}'s completed tasks` : undefined}
+          >
+            <span className="text-sm font-bold leading-none">{formatPoints(row.pointsEarned)}</span>
+            <div className="mt-1.5 flex w-full items-end justify-center" style={{ height: CHART_HEIGHT }}>
+              <div className="w-8 rounded-t-sm" style={{ height: barHeight, backgroundColor: color }} />
+            </div>
+            <div className="mt-2 flex w-full flex-col items-center gap-0.5 border-t border-border pt-1.5 text-center">
+              <span className="w-full truncate text-xs font-medium" title={row.employeeName}>{row.employeeName}</span>
+              <span className="text-[10px] text-muted-foreground">
+                {row.tasksCompleted} task{row.tasksCompleted === 1 ? "" : "s"}
+              </span>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
 }

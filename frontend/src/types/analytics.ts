@@ -65,6 +65,10 @@ export interface DashboardAnalytics {
   teamEfficiencyTrend: MonthlyRate[]
   strikeDistribution: StrikeDistributionSlice[]
   atRiskTasks: AtRiskTaskItem[]
+  /** Per employee, distinct tasks created in [from, to] that have had their due date extended by the Admin at least once - whether or not that extension deducted points. */
+  employeeDueDateExtensions: EmployeeCount[]
+  /** Per employee, how many times a task has been reassigned away from them (the "from" side) in [from, to]. */
+  employeeReassignedAway: EmployeeCount[]
 }
 
 /** Backs the per-task "Points — This Task" panel (Admin-only), scoped to one assignment. */

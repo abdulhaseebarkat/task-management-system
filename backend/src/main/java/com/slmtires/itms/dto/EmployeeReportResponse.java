@@ -65,9 +65,9 @@ public record EmployeeReportResponse(
      * genuinely forfeited (basePoints minus resultingPoints) across every task, open or resolved -
      * a strike already landed on an open task counts here immediately, but an untouched open task
      * contributes nothing to either earned or lost, only to possible, until something actually
-     * happens to it. efficiencyRate is earned ÷ (earned + lost) - i.e. of the points that have
-     * already been decided one way or the other, what fraction were kept - so a pile of normal,
-     * still-open work never drags the rate down on its own.
+     * happens to it. efficiencyRate is earned ÷ possible - of every point ever at stake (including
+     * still-open work, at its live value), what fraction has actually been banked so far. By design,
+     * a pile of normal, still-open work DOES lower this until it's actually completed.
      */
     public record PointsSummary(BigDecimal pointsEarned, BigDecimal pointsPossible, BigDecimal pointsLost, int efficiencyRate, long tasksFailed) {}
 

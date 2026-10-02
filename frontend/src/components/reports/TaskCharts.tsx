@@ -52,6 +52,72 @@ export function AssignedVsCompletedChart({ rows }: { rows: AssignedVsCompletedRo
   )
 }
 
+export interface NamedCountRow { employeeId: number; employeeName: string; count: number }
+
+/**
+ * Flat, single-color vertical bar chart - one bar per employee, for simple "how many of X per
+ * employee" widgets (due-date extensions, reassignments away, etc). Plain HTML/CSS, not SVG, so
+ * value labels sit in normal document flow and can never be clipped, however tall the leading bar
+ * is - the same structural fix applied to the Employee Performance chart.
+ */
+export function EmployeeCountBarChart({ rows, color, emptyMessage, onSelect }: { rows: NamedCountRow[]; color: string; emptyMessage: string; onSelect?: (employeeId: number) => void }) {
+  const max = Math.max(...rows.map((r) => r.count), 1)
+  const chartHeight = 100
+
+  if (rows.length === 0) {
+    return <p className="mt-3 text-xs text-muted-foreground">{emptyMessage}</p>
+  }
+
+  return (
+    <div className="flex items-end justify-center gap-4 overflow-x-auto px-2 pb-1 pt-6">
+      {rows.map((row) => {
+        const barHeight = row.count <= 0 ? 3 : Math.max((row.count / max) * chartHeight, 4)
+        return (
+          <div
+            key={row.employeeId}
+            className={`flex w-[88px] flex-shrink-0 flex-col items-center rounded-md p-1 ${onSelect ? "cursor-pointer transition-colors hover:bg-accent" : ""}`}
+            onClick={onSelect ? () => onSelect(row.employeeId) : undefined}
+            title={onSelect ? `View ${row.employeeName}'s tasks` : undefined}
+          >
+            <span className="text-sm font-bold leading-none">{row.count}</span>
+            <div className="mt-1.5 flex w-full items-end justify-center" style={{ height: chartHeight }}>
+              <div className="w-7 rounded-t-sm" style={{ height: barHeight, backgroundColor: color }} />
+            </div>
+            <span className="mt-2 w-full truncate text-center text-xs font-medium" title={row.employeeName}>{row.employeeName}</span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+/** "Employee | Count" table, shown alongside EmployeeCountBarChart for the same underlying data. */
+export function EmployeeCountTable({ rows, countLabel, onSelect }: { rows: NamedCountRow[]; countLabel: string; onSelect?: (employeeId: number) => void }) {
+  return (
+    <table className="w-full text-xs">
+      <thead>
+        <tr className="text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+          <th className="pb-1.5 font-semibold">Employee</th>
+          <th className="pb-1.5 text-right font-semibold">{countLabel}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.length === 0 && <tr><td colSpan={2} className="py-1.5 text-muted-foreground">None</td></tr>}
+        {rows.map((row) => (
+          <tr
+            key={row.employeeId}
+            className={`border-t border-border first:border-0 ${onSelect ? "cursor-pointer hover:bg-accent" : ""}`}
+            onClick={onSelect ? () => onSelect(row.employeeId) : undefined}
+          >
+            <td className="py-1.5">{row.employeeName}</td>
+            <td className="py-1.5 text-right font-semibold">{row.count}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
 /** The "Status | Count" breakdown paired with the chart above, plus a live Overdue count the status distribution itself doesn't carry (overdue isn't a TaskStatus value). */
 export function StatusBreakdownTable({ statusDistribution, overdue }: { statusDistribution: StatusSlice[]; overdue: number }) {
   return (

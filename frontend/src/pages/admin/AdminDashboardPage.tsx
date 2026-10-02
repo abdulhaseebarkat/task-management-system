@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react"
-import { Link } from "react-router-dom"
+import { Link, useNavigate } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { AppLayout } from "@/components/layout/AppLayout"
 import { badgeClass, isTaskOverdue, label, OVERDUE_BADGE_CLASS } from "@/components/tasks/taskDisplay"
-import { efficiencyDotColor, MonthlyRateBars, strikeLevelColor } from "@/components/reports/PointsCharts"
+import { efficiencyDotColor, EmployeePerformanceChart, MonthlyRateBars, strikeLevelColor } from "@/components/reports/PointsCharts"
+import { AssignedVsCompletedChart, EmployeeCountBarChart, EmployeeCountTable } from "@/components/reports/TaskCharts"
 import { useRealtimeSubscription } from "@/hooks/useRealtimeSubscription"
 import { backfillPoints, getDashboardAnalytics } from "@/api/analytics"
 import { listTasks, listTaskCategories } from "@/api/tasks"
@@ -23,7 +24,7 @@ const STATUS_COLORS: Record<string, string> = {
   CANCELLED: "#898781",
 }
 const STATUS_ORDER = ["COMPLETED", "IN_PROGRESS", "ASSIGNED", "ON_HOLD", "BLOCKED", "FAILED", "CANCELLED"]
-const STRIKE_LABELS: Record<string, string> = { "0": "0 strikes — full points", "1": "1 strike — 50%", "2": "2 strikes — 25%", FAILED: "Failed (3 strikes)" }
+const STRIKE_LABELS: Record<string, string> = { "0": "No extensions — full points", "1": "1 extension — 50%", "2": "2 extensions — 25%", FAILED: "Failed (3rd extension)" }
 const STRIKE_ORDER = ["0", "1", "2", "FAILED"]
 const PRIORITY_COLORS: Record<string, string> = {
   LOW: "#86b6ef",
@@ -60,7 +61,7 @@ function Card({ title, subtitle, children }: { title: string; subtitle: string; 
   )
 }
 
-function StatusDonut({ slices }: { slices: { status: string; count: number; percent: number }[] }) {
+function StatusDonut({ slices, onSelect }: { slices: { status: string; count: number; percent: number }[]; onSelect?: (status: string) => void }) {
   const total = slices.reduce((sum, s) => sum + s.count, 0)
   const radius = 70
   const circumference = 2 * Math.PI * radius
@@ -76,7 +77,8 @@ function StatusDonut({ slices }: { slices: { status: string; count: number; perc
           const el = (
             <circle key={s.status} cx="90" cy="90" r={radius} fill="none" stroke={STATUS_COLORS[s.status]}
               strokeWidth="24" strokeDasharray={`${length} ${circumference - length}`}
-              strokeDashoffset={-offset} transform="rotate(-90 90 90)" />
+              strokeDashoffset={-offset} transform="rotate(-90 90 90)"
+              onClick={onSelect ? () => onSelect(s.status) : undefined} className={onSelect ? "cursor-pointer" : undefined} />
           )
           offset += length
           return el
@@ -86,7 +88,11 @@ function StatusDonut({ slices }: { slices: { status: string; count: number; perc
       </svg>
       <div className="flex flex-col gap-2">
         {ordered.map((s) => (
-          <div key={s.status} className="flex items-center gap-1.5 text-xs">
+          <div
+            key={s.status}
+            className={`flex items-center gap-1.5 rounded p-1 -m-1 text-xs ${onSelect ? "cursor-pointer hover:bg-accent" : ""}`}
+            onClick={onSelect ? () => onSelect(s.status) : undefined}
+          >
             <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: STATUS_COLORS[s.status] }} />
             <span className="text-muted-foreground">{label(s.status)}</span>
             <span className="ml-auto font-bold">{s.percent}%</span>
@@ -97,12 +103,16 @@ function StatusDonut({ slices }: { slices: { status: string; count: number; perc
   )
 }
 
-function HorizontalBars({ rows, color, max }: { rows: { label: string; count: number }[]; color: string; max: number }) {
+function HorizontalBars({ rows, color, max, onSelect }: { rows: { id: number; label: string; count: number }[]; color: string; max: number; onSelect?: (id: number) => void }) {
   const scale = Math.max(max, 1)
   return (
     <div className="mt-4 flex flex-col gap-3">
       {rows.map((row) => (
-        <div key={row.label} className="flex items-center gap-2.5">
+        <div
+          key={row.id}
+          className={`flex items-center gap-2.5 rounded p-1 -m-1 ${onSelect ? "cursor-pointer hover:bg-accent" : ""}`}
+          onClick={onSelect ? () => onSelect(row.id) : undefined}
+        >
           <span className="w-[74px] flex-shrink-0 truncate text-xs text-muted-foreground" title={row.label}>{row.label}</span>
           <div className="h-3.5 flex-grow rounded bg-[#e1e0d9]">
             <div className="h-3.5 rounded" style={{ width: `${(row.count / scale) * 100}%`, backgroundColor: color }} />
@@ -114,7 +124,7 @@ function HorizontalBars({ rows, color, max }: { rows: { label: string; count: nu
   )
 }
 
-function PriorityBars({ rows }: { rows: PriorityCount[] }) {
+function PriorityBars({ rows, onSelect }: { rows: PriorityCount[]; onSelect?: (priority: string) => void }) {
   const max = Math.max(...rows.map((r) => r.count), 1)
   const barWidth = 60
   const gap = 30
@@ -127,7 +137,8 @@ function PriorityBars({ rows }: { rows: PriorityCount[] }) {
         const h = Math.max((row.count / max) * chartHeight, row.count > 0 ? 8 : 0)
         const y = 170 - h
         return (
-          <g key={row.priority}>
+          <g key={row.priority} onClick={onSelect ? () => onSelect(row.priority) : undefined} className={onSelect ? "cursor-pointer" : undefined}>
+            <rect x={x} y="0" width={barWidth} height="170" fill="transparent" />
             <rect x={x} y={y} width={barWidth} height={h} rx="4" fill={PRIORITY_COLORS[row.priority]} />
             <text x={x + barWidth / 2} y={y - 8} textAnchor="middle" fontSize="13" fontWeight="700">{row.count}</text>
             <text x={x + barWidth / 2} y="188" textAnchor="middle" fontSize="11" fill="#898781">{label(row.priority)}</text>
@@ -192,11 +203,15 @@ function OverdueBars({ weeks }: { weeks: WeekCount[] }) {
   )
 }
 
-function PointsLeaderboard({ rows }: { rows: PointsLeaderboardEntry[] }) {
+function PointsLeaderboard({ rows, onSelect }: { rows: PointsLeaderboardEntry[]; onSelect?: (employeeId: number) => void }) {
   return (
     <div className="mt-3.5 flex flex-col gap-3">
       {rows.map((row) => (
-        <div key={row.employeeId} className="flex items-center gap-2.5">
+        <div
+          key={row.employeeId}
+          className={`flex items-center gap-2.5 rounded p-1 -m-1 ${onSelect ? "cursor-pointer hover:bg-accent" : ""}`}
+          onClick={onSelect ? () => onSelect(row.employeeId) : undefined}
+        >
           <span className="h-2 w-2 flex-shrink-0 rounded-full" style={{ backgroundColor: efficiencyDotColor(row.efficiencyRate) }} />
           <span className="w-[100px] flex-shrink-0 truncate text-xs" title={row.employeeName}>{row.employeeName}</span>
           <div className="h-3.5 flex-grow rounded bg-[#e1e0d9]">
@@ -238,7 +253,7 @@ function StrikeDonut({ slices }: { slices: StrikeDistributionSlice[] }) {
           return el
         })}
         <text x="80" y="76" textAnchor="middle" fontSize="20" fontWeight="700">{zeroPercent}%</text>
-        <text x="80" y="94" textAnchor="middle" fontSize="9" fill="#898781">0 STRIKES</text>
+        <text x="80" y="94" textAnchor="middle" fontSize="9" fill="#898781">NO EXTENSIONS</text>
       </svg>
       <div className="flex flex-col gap-2">
         {ordered.map((s) => (
@@ -263,7 +278,7 @@ function AtRiskList({ items }: { items: AtRiskTaskItem[] }) {
   }
 
   if (items.length === 0) {
-    return <p className="mt-3.5 text-xs text-muted-foreground">No open task is currently sitting at a strike.</p>
+    return <p className="mt-3.5 text-xs text-muted-foreground">No open task currently has a point-deducting deadline extension against it.</p>
   }
   return (
     <div className="mt-3.5 flex flex-col">
@@ -275,7 +290,7 @@ function AtRiskList({ items }: { items: AtRiskTaskItem[] }) {
             <div className="truncate text-[11px] text-muted-foreground">{item.taskNumber} · {item.employeeName}</div>
           </div>
           <span className={`flex-shrink-0 rounded-full px-2 py-1 text-[11px] font-bold ${item.strikeLevel === 1 ? "bg-warning/15 text-[#a8790f]" : "bg-serious/15 text-serious"}`}>
-            Strike {item.strikeLevel} · {dueLabel(item.dueDate)}
+            Extension {item.strikeLevel} · {dueLabel(item.dueDate)}
           </span>
         </Link>
       ))}
@@ -286,6 +301,7 @@ function AtRiskList({ items }: { items: AtRiskTaskItem[] }) {
 const selectClass = "rounded-md border border-input bg-card px-2.5 py-2 text-xs"
 
 export function AdminDashboardPage() {
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [preset, setPreset] = useState<DatePreset>("30")
   const [employeeId, setEmployeeId] = useState("")
@@ -343,6 +359,22 @@ export function AdminDashboardPage() {
 
   const hasFilters = employeeId !== "" || status !== "" || priority !== "" || categoryId !== "" || preset !== "30"
 
+  // Click-through from a chart/table into the exact underlying tasks (or, for points-related
+  // employee metrics, into their Individual Report - which already has the precise breakdown a
+  // generic task-list filter can't express, e.g. "reassigned away" or "due-date history").
+  function goToTasks(params: Record<string, string | number>) {
+    navigate(`/admin/tasks?${new URLSearchParams(Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)]))).toString()}`)
+  }
+  function goToIndividualReport(selectedEmployeeId: number) {
+    navigate(`/admin/reports?tab=individual&employeeId=${selectedEmployeeId}`)
+  }
+  // Same as goToIndividualReport but pre-filters the "Individual Tasks" table to only the
+  // employee's tasks with an extended due date, since that's the precise list the "Due Date
+  // Extensions by Employee" chart/table promises - not the full, unfiltered report.
+  function goToExtendedTasks(selectedEmployeeId: number) {
+    navigate(`/admin/reports?tab=individual&employeeId=${selectedEmployeeId}&onlyExtended=true`)
+  }
+
   return (
     <AppLayout title="Dashboard" subtitle="Overview of IT department task activity">
       <div className="flex flex-col gap-5">
@@ -376,6 +408,13 @@ export function AdminDashboardPage() {
           <p className="text-sm text-muted-foreground">Loading…</p>
         ) : (
           <>
+            <Card title="Employee Performance" subtitle={`Ranked by points earned from completed tasks, ${from} to ${to} · Admin-only`}>
+              <EmployeePerformanceChart
+                rows={employeePerformanceRows(data.pointsLeaderboard, data.employeeCompletion)}
+                onSelect={(id) => goToTasks({ assigneeId: id, status: "COMPLETED" })}
+              />
+            </Card>
+
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
               <Tile label="Total Tasks" value={data.summary.totalTasks} />
               <Tile label="Active" value={data.summary.active} tone="text-primary" />
@@ -385,6 +424,21 @@ export function AdminDashboardPage() {
               <Tile label="On Hold" value={data.summary.onHold} tone={data.summary.onHold > 0 ? "text-warning" : undefined} />
               <Tile label="Reassigned" value={data.summary.reassigned} />
               <Tile label="Completion Rate" value={`${data.summary.completionRate}%`} tone="text-success" />
+            </div>
+
+            <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1.4fr_1fr]">
+              <Card title="Tasks Assigned vs. Completed, by Person" subtitle={`Created ${from} to ${to} - excludes Admin`}>
+                <AssignedVsCompletedChart
+                  rows={data.employeeAssigned.map((e) => ({
+                    label: e.employeeName,
+                    assigned: e.count,
+                    completed: data.employeeCompletion.find((c) => c.employeeId === e.employeeId)?.count ?? 0,
+                  }))}
+                />
+              </Card>
+              <Card title="Team Workload" subtitle="Active tasks per employee (live)">
+                <HorizontalBars rows={data.teamWorkload.map(employeeRow)} color="#2a78d6" max={Math.max(...data.teamWorkload.map((r) => r.count), 1)} onSelect={(id) => goToTasks({ assigneeId: id })} />
+              </Card>
             </div>
 
             <div>
@@ -403,31 +457,44 @@ export function AdminDashboardPage() {
               </div>
               <div className="mt-3 grid grid-cols-1 gap-5 lg:grid-cols-[1.3fr_1fr]">
                 <Card title="Points Leaderboard" subtitle={`Efficiency = points earned ÷ points possible, ${from} to ${to}`}>
-                  <PointsLeaderboard rows={data.pointsLeaderboard} />
+                  <PointsLeaderboard rows={data.pointsLeaderboard} onSelect={goToIndividualReport} />
                 </Card>
                 <Card title="Team Efficiency Trend" subtitle="Department average, last 6 months">
                   <MonthlyRateBars months={data.teamEfficiencyTrend} />
                 </Card>
               </div>
               <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-[1fr_1.2fr]">
-                <Card title="Strike Distribution" subtitle={`Org-wide, ${from} to ${to} - open tasks included at their current standing`}>
+                <Card title="Points Impact by Deadline Extensions" subtitle={`Org-wide, ${from} to ${to} - open tasks included at their current standing`}>
                   <StrikeDonut slices={data.strikeDistribution} />
                 </Card>
-                <Card title="At-Risk Tasks" subtitle="Currently open, sitting at strike 1 or 2 right now">
+                <Card title="At-Risk Tasks" subtitle="Currently open, sitting at 1 or 2 deadline extensions right now">
                   <AtRiskList items={data.atRiskTasks} />
+                </Card>
+              </div>
+              <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-[1.4fr_1fr]">
+                <Card title="Due Date Extensions by Employee" subtitle={`Tasks created ${from} to ${to} with an extended due date - with or without a points deduction`}>
+                  <EmployeeCountBarChart rows={data.employeeDueDateExtensions} color="#d9a62c" emptyMessage="No due dates have been extended in this window." onSelect={goToExtendedTasks} />
+                </Card>
+                <Card title="Due Date Extensions" subtitle="Counts behind the graph">
+                  <EmployeeCountTable rows={data.employeeDueDateExtensions} countLabel="Tasks extended" onSelect={goToExtendedTasks} />
+                </Card>
+              </div>
+              <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-[1.4fr_1fr]">
+                <Card title="Reassigned Away by Employee" subtitle={`Tasks created ${from} to ${to}, reassigned away from each employee`}>
+                  <EmployeeCountBarChart rows={data.employeeReassignedAway} color="#5b6b82" emptyMessage="No tasks have been reassigned away in this window." onSelect={goToIndividualReport} />
+                </Card>
+                <Card title="Reassigned Away" subtitle="Counts behind the graph">
+                  <EmployeeCountTable rows={data.employeeReassignedAway} countLabel="Tasks reassigned away" onSelect={goToIndividualReport} />
                 </Card>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
               <Card title="Task Status Distribution" subtitle={`All tasks, ${from} to ${to}`}>
-                <StatusDonut slices={data.statusDistribution} />
-              </Card>
-              <Card title="Team Workload" subtitle="Active tasks per employee (live)">
-                <HorizontalBars rows={data.teamWorkload.map(employeeRow)} color="#2a78d6" max={Math.max(...data.teamWorkload.map((r) => r.count), 1)} />
+                <StatusDonut slices={data.statusDistribution} onSelect={(s) => goToTasks({ status: s })} />
               </Card>
               <Card title="Priority Distribution" subtitle="All currently-open tasks">
-                <PriorityBars rows={data.priorityDistribution} />
+                <PriorityBars rows={data.priorityDistribution} onSelect={(p) => goToTasks({ priority: p })} />
               </Card>
             </div>
 
@@ -442,10 +509,16 @@ export function AdminDashboardPage() {
 
             <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
               <Card title="Employee Completion" subtitle={`Completed tasks, ${from} to ${to}`}>
-                <HorizontalBars rows={data.employeeCompletion.map(employeeRow)} color="#0ca30c" max={Math.max(...data.employeeCompletion.map((r) => r.count), 1)} />
+                <HorizontalBars
+                  rows={data.employeeCompletion.map(employeeRow)} color="#0ca30c" max={Math.max(...data.employeeCompletion.map((r) => r.count), 1)}
+                  onSelect={(id) => goToTasks({ assigneeId: id, status: "COMPLETED" })}
+                />
               </Card>
               <Card title="Category Distribution" subtitle={`Top categories, ${from} to ${to}`}>
-                <HorizontalBars rows={data.categoryDistribution.map((c) => ({ label: c.categoryName, count: c.count }))} color="#2a78d6" max={Math.max(...data.categoryDistribution.map((r) => r.count), 1)} />
+                <HorizontalBars
+                  rows={data.categoryDistribution.map((c) => ({ id: c.categoryId, label: c.categoryName, count: c.count }))} color="#2a78d6" max={Math.max(...data.categoryDistribution.map((r) => r.count), 1)}
+                  onSelect={(id) => goToTasks({ categoryId: id })}
+                />
               </Card>
             </div>
 
@@ -516,6 +589,17 @@ export function AdminDashboardPage() {
   )
 }
 
-function employeeRow(row: EmployeeCount): { label: string; count: number } {
-  return { label: row.employeeName, count: row.count }
+function employeeRow(row: EmployeeCount): { id: number; label: string; count: number } {
+  return { id: row.employeeId, label: row.employeeName, count: row.count }
+}
+
+/** Joins the leaderboard's pointsEarned with employeeCompletion's task count - both already computed server-side, just combined for this one chart. */
+function employeePerformanceRows(leaderboard: PointsLeaderboardEntry[], completion: EmployeeCount[]) {
+  const completedByEmployee = new Map(completion.map((c) => [c.employeeId, c.count]))
+  return leaderboard.map((entry) => ({
+    employeeId: entry.employeeId,
+    employeeName: entry.employeeName,
+    pointsEarned: entry.pointsEarned,
+    tasksCompleted: completedByEmployee.get(entry.employeeId) ?? 0,
+  }))
 }

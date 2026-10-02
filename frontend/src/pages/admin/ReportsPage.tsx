@@ -1,4 +1,5 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
+import { useSearchParams } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import { AppLayout } from "@/components/layout/AppLayout"
 import { DepartmentReportView } from "@/components/reports/DepartmentReportView"
@@ -11,10 +12,23 @@ const tabClass = (active: boolean) =>
   `rounded-md px-3.5 py-2 text-xs font-semibold ${active ? "bg-primary text-primary-foreground" : "border border-border text-secondary-foreground"}`
 
 export function ReportsPage() {
-  const [tab, setTab] = useState<Tab>("department")
+  const [searchParams, setSearchParams] = useSearchParams()
+  // A dashboard chart can deep-link straight into one employee's Individual Report via
+  // ?tab=individual&employeeId=X - read once at mount, same pattern as TasksPage's taskId.
+  const [tab, setTab] = useState<Tab>(() => (searchParams.get("tab") === "individual" ? "individual" : "department"))
   const usersQuery = useQuery({ queryKey: ["users"], queryFn: listUsers })
   const teamMembers = (usersQuery.data ?? []).filter((u) => u.role === "TEAM_MEMBER")
-  const [employeeId, setEmployeeId] = useState<number | null>(null)
+  const [employeeId, setEmployeeId] = useState<number | null>(() => {
+    const raw = searchParams.get("employeeId")
+    return raw ? Number(raw) : null
+  })
+
+  useEffect(() => {
+    if (searchParams.has("tab") || searchParams.has("employeeId")) {
+      setSearchParams((params) => { params.delete("tab"); params.delete("employeeId"); return params }, { replace: true })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const selected = employeeId ?? teamMembers[0]?.id ?? null
 

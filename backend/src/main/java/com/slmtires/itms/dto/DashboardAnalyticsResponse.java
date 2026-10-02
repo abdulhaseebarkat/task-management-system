@@ -27,7 +27,14 @@ public record DashboardAnalyticsResponse(
     List<PointsLeaderboardEntry> pointsLeaderboard,
     List<MonthlyRate> teamEfficiencyTrend,
     List<StrikeDistributionSlice> strikeDistribution,
-    List<AtRiskTaskItem> atRiskTasks
+    List<AtRiskTaskItem> atRiskTasks,
+    /** Per employee, distinct tasks created in [from, to] that have had their due date extended by
+     * the Admin at least once - counted whether or not that extension deducted points. A task
+     * extended more than once still only counts once. */
+    List<EmployeeCount> employeeDueDateExtensions,
+    /** Per employee, how many times a task has been reassigned away from them (the "from" side) in
+     * [from, to] - mirrors EmployeeReportResponse.Summary#reassignedAway, computed for everyone at once. */
+    List<EmployeeCount> employeeReassignedAway
 ) {
     public record Summary(
         long totalTasks,

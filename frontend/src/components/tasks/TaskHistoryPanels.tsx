@@ -80,7 +80,7 @@ export function TaskHistoryPanels({ task, employee, teamMembers, busy, onDueDate
         </label>
         <p className="text-muted-foreground">
           {deductPoints
-            ? "This will count as a strike against the assignee(s)' points if applicable."
+            ? "This will count as a deadline extension against the assignee(s)' points if applicable."
             : "No points will be deducted for this extension - it still counts toward the visible extension history."}
         </p>
         <button disabled={busy || !dueDate || !dueReason.trim()} className="rounded bg-primary px-3 py-2 font-semibold text-primary-foreground disabled:opacity-60">Save due date</button>
