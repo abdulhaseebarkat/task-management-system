@@ -125,6 +125,42 @@ public class PointsService {
     }
 
     /**
+     * Re-bases every still-open assignment cycle on this task onto its new priority's base points,
+     * right after an Admin edits priority on an already-assigned task - otherwise basePoints stays
+     * frozen at whatever it was when the cycle started (sealAssigned reads the priority once, at
+     * that moment), so "possible points" would keep reflecting the old priority indefinitely.
+     * Inserts a new REBASED event rather than touching the cycle's existing rows - task_points_events
+     * is append-only (DB-enforced). A cycle already resolved (COMPLETED/FAILED/CANCELLED/REASSIGNED)
+     * is frozen in time and left alone, same as a due-date extension never retroactively rewrites a
+     * finished outcome. A cycle already sitting at a strike keeps that same strike level - its ratio
+     * of resulting-to-base carries forward unchanged, just recomputed against the new base (e.g.
+     * sitting at 50% keeps paying 50%, now 50% of the new value). No-op if priority didn't actually
+     * change, or if the cycle's current base already matches it.
+     */
+    @Transactional
+    public void recalculateBasePointsForPriorityChange(Task task, TaskPriority oldPriority) {
+        if (task.getPriority() == oldPriority) {
+            return;
+        }
+        BigDecimal newBase = scale(basePointsFor(task.getPriority()));
+        for (TaskAssignment assignment : task.getAssignments()) {
+            if (!assignment.isCurrent() || assignment.getId() == null) {
+                continue;
+            }
+            TaskPointsEvent latest = pointsEventRepository.findFirstByAssignmentIdOrderByOccurredAtDescIdDesc(assignment.getId()).orElse(null);
+            if (latest == null || TERMINAL.contains(latest.getEventType()) || latest.getBasePoints().compareTo(newBase) == 0) {
+                continue;
+            }
+            BigDecimal ratio = latest.getBasePoints().signum() == 0
+                ? BigDecimal.ONE
+                : latest.getResultingPoints().divide(latest.getBasePoints(), 4, RoundingMode.HALF_UP);
+            BigDecimal resulting = scale(newBase.multiply(ratio));
+            seal(task, assignment, PointsEventType.REBASED, newBase, resulting.subtract(latest.getResultingPoints()), resulting,
+                Instant.now(), "Priority changed to " + task.getPriority().name().toLowerCase());
+        }
+    }
+
+    /**
      * Evaluates every current assignment on this task against due-date reality and seals whatever
      * strike/failure/completion events are newly due. Called from every natural task-mutation
      * touch-point (see class Javadoc). Sets task.status to FAILED whenever any current assignment's
@@ -174,7 +210,9 @@ public class PointsService {
             .filter(e -> e.getEventType() == PointsEventType.STRIKE_1 || e.getEventType() == PointsEventType.STRIKE_2)
             .count();
         Instant cycleStart = cycle.get(0).getOccurredAt();
-        BigDecimal basePoints = cycle.get(0).getBasePoints();
+        // The cycle's most recently sealed basePoints, not necessarily its original ASSIGNED value -
+        // a REBASED event (priority edited mid-cycle) moves this forward without disturbing strikesSoFar.
+        BigDecimal basePoints = cycle.get(cycle.size() - 1).getBasePoints();
 
         List<TaskDueDateHistory> extensionsThisCycle = dueDateHistoryRepository.findByTaskIdOrderByChangedAtAsc(task.getId()).stream()
             .filter(h -> h.getChangedAt().isAfter(cycleStart))

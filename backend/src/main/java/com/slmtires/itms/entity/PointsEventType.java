@@ -16,5 +16,10 @@ public enum PointsEventType {
     CANCELLED,
     /** Reassigned away before a 3rd strike - neutral, excluded (a 3rd-strike reassignment needs no
      * separate event; FAILED already closed the cycle). */
-    REASSIGNED
+    REASSIGNED,
+    /** Admin edited priority on a still-open cycle - base points re-pegged to the new priority,
+     * preserving whatever strike level the cycle was already sitting at (e.g. still 50% of base,
+     * just 50% of the new base). Written instead of mutating the original ASSIGNED/STRIKE_1/STRIKE_2
+     * row, since history is append-only; this becomes the cycle's new "latest" event. */
+    REBASED
 }

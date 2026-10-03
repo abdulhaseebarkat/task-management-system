@@ -55,6 +55,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -148,9 +149,12 @@ public class AnalyticsService {
         // the leaderboard and strike distribution are scoped to [from, to], while the efficiency
         // trend and at-risk list are deliberately NOT date-bound (a live snapshot / rolling trend).
         List<TaskPointsEvent> allPointsEvents = pointsEventRepository.findByOccurredAtBetweenOrderByOccurredAtDesc(Instant.EPOCH, Instant.now());
-        List<PointsLeaderboardEntry> pointsLeaderboard = buildPointsLeaderboard(allPointsEvents, startOfDay(from), startOfDay(to.plusDays(1)));
-        List<MonthlyRate> teamEfficiencyTrend = buildMonthlyRate(allPointsEvents);
-        List<StrikeDistributionSlice> strikeDistribution = buildStrikeDistribution(allPointsEvents, startOfDay(from), startOfDay(to.plusDays(1)));
+        // Independent of every filter above - a Draft task (no due date yet) is never real work, so
+        // it's kept out of every points total no matter what the Admin filtered the dashboard to.
+        Set<Long> draftTaskIds = new HashSet<>(taskRepository.findIdsByStatus(TaskStatus.DRAFT));
+        List<PointsLeaderboardEntry> pointsLeaderboard = buildPointsLeaderboard(allPointsEvents, draftTaskIds, startOfDay(from), startOfDay(to.plusDays(1)));
+        List<MonthlyRate> teamEfficiencyTrend = buildMonthlyRate(allPointsEvents, draftTaskIds);
+        List<StrikeDistributionSlice> strikeDistribution = buildStrikeDistribution(allPointsEvents, draftTaskIds, startOfDay(from), startOfDay(to.plusDays(1)));
         List<AtRiskTaskItem> atRiskTasks = buildAtRiskTasks(liveOpen, allPointsEvents);
         List<EmployeeCount> employeeDueDateExtensions = buildEmployeeDueDateExtensionCounts(createdInRange, employees());
         List<EmployeeCount> employeeReassignedAway = buildEmployeeReassignedAwayCounts(employees(), startOfDay(from), startOfDay(to.plusDays(1)));
@@ -200,6 +204,7 @@ public class AnalyticsService {
 
         record OpenItem(Task task, TaskAssignment assignment) {}
         List<OpenItem> employeeOpen = orgAllMatching.stream()
+            .filter(t -> t.getStatus() != TaskStatus.DRAFT) // not yet real work - stays off their own workload, same as it's hidden from their task list
             .flatMap(t -> t.getAssignments().stream()
                 .filter(a -> a.isCurrent() && a.getUser().getId().equals(employeeId) && ASSIGNMENT_OPEN_STATUSES.contains(a.getStatus()))
                 .map(a -> new OpenItem(t, a)))
@@ -238,11 +243,14 @@ public class AnalyticsService {
         // summary/breakdown are scoped to [from, to], while the trend and events list are not
         // (a rolling trend and a "most recent activity" list respectively).
         List<TaskPointsEvent> employeeAllEvents = pointsEventRepository.findByUserIdAndOccurredAtBetweenOrderByOccurredAtDesc(employeeId, Instant.EPOCH, Instant.now());
-        EmployeeReportResponse.PointsSummary pointsSummary = buildPointsSummary(employeeAllEvents, fromInstant, toInstant);
-        List<EmployeeReportResponse.PointsBreakdownRow> pointsBreakdown = buildPointsBreakdown(employeeAllEvents, fromInstant, toInstant);
-        List<MonthlyRate> monthlyPointsTrend = buildMonthlyRate(employeeAllEvents);
+        // Independent of every filter above - a Draft task (no due date yet) is never real work, so
+        // it's kept out of every points total no matter what the Admin filtered this report to.
+        Set<Long> draftTaskIds = new HashSet<>(taskRepository.findIdsByStatus(TaskStatus.DRAFT));
+        EmployeeReportResponse.PointsSummary pointsSummary = buildPointsSummary(employeeAllEvents, draftTaskIds, fromInstant, toInstant);
+        List<EmployeeReportResponse.PointsBreakdownRow> pointsBreakdown = buildPointsBreakdown(employeeAllEvents, draftTaskIds, fromInstant, toInstant);
+        List<MonthlyRate> monthlyPointsTrend = buildMonthlyRate(employeeAllEvents, draftTaskIds);
         List<PointEventItem> pointEvents = buildPointEventItems(employeeAllEvents);
-        List<EmployeeReportResponse.TaskDetailRow> taskDetails = buildTaskDetails(employeeId, employeeCreatedInRange, employeeAllEvents);
+        List<EmployeeReportResponse.TaskDetailRow> taskDetails = buildTaskDetails(employeeId, employeeCreatedInRange, employeeAllEvents, draftTaskIds);
 
         return new EmployeeReportResponse(employeeId, employee.getName(), from, to, summary, statusDistribution,
             priorityDistribution, categoryDistribution, completionTrend, currentWorkload, reassignedTasks, recentActivity,
@@ -550,42 +558,68 @@ public class AnalyticsService {
     }
 
     /**
-     * Every points event that counts toward earned/possible totals: a resolved cycle's terminal
-     * outcome (COMPLETED/FAILED - same as always, and there can be more than one per assignment
-     * over its lifetime if it's been reopened/reinstated), PLUS each still-open assignment's current
-     * cycle, valued at whatever it's presently sitting at - full base points if untouched, or
-     * reduced if it has already taken a strike. This is what makes points show up the moment a task
-     * is assigned rather than only once it resolves, while staying perfectly continuous: an open
-     * cycle's live value and its eventual COMPLETED/FAILED value are computed from the exact same
-     * numbers, so resolving a task never produces a jump - only a genuine strike does. A cycle
-     * closed out neutrally (CANCELLED, or REASSIGNED without the points-loss checkbox) contributes
-     * nothing either way, exactly as before - "still open" specifically means its latest event is
-     * ASSIGNED/STRIKE_1/STRIKE_2, never one of the terminal types.
+     * Every points event that counts toward earned/possible totals: each scoring cycle's terminal
+     * outcome (COMPLETED/FAILED - and there can be more than one *cycle* per assignment over its
+     * lifetime if it's been reopened/reinstated, each starting at its own ASSIGNED event), PLUS the
+     * current cycle's live value if it's still open - full base points if untouched, or reduced if
+     * it has already taken a strike. This is what makes points show up the moment a task is assigned
+     * rather than only once it resolves, while staying perfectly continuous: an open cycle's live
+     * value and its eventual COMPLETED/FAILED value are computed from the exact same numbers, so
+     * resolving a task never produces a jump - only a genuine strike does. A cycle closed out
+     * neutrally (CANCELLED, or REASSIGNED without the points-loss checkbox) contributes nothing
+     * either way.
+     *
+     * <p>Events are grouped into cycles the same way {@code PointsService#evaluateAssignment} does -
+     * split at each ASSIGNED event - and only the <em>latest</em> terminal event within a cycle
+     * counts, not every one ever sealed in it. Every cycle naturally has exactly one COMPLETED/FAILED
+     * already; the one exception is a one-time data repair appending a correcting COMPLETED/FAILED
+     * after the fact (e.g. a priority edit that landed after the original completion, before the bug
+     * that caused that was fixed) - taking the latest means the correction replaces the original
+     * instead of stacking on top of it, while a genuinely new cycle from a later reopen still counts
+     * separately and in full, exactly as before.
+     *
+     * <p>A still-open cycle belonging to a task that is currently in Draft (no due date set yet) is
+     * excluded from the live half of this, regardless of what it's presently sitting at - a Draft
+     * task isn't real work yet (it's invisible to its own assignee, same as {@code
+     * TaskService#listTasks}), so it shouldn't inflate anyone's "possible" points or efficiency
+     * until an Admin actually sets a due date and the task becomes real. An already-resolved
+     * COMPLETED/FAILED outcome is never affected by this - a task can't be Draft once it has reached
+     * either of those.
      */
-    private List<TaskPointsEvent> countableEvents(List<TaskPointsEvent> events) {
+    private List<TaskPointsEvent> countableEvents(List<TaskPointsEvent> events, Set<Long> draftTaskIds) {
         List<TaskPointsEvent> result = new ArrayList<>();
-        for (List<TaskPointsEvent> cycle : events.stream().collect(Collectors.groupingBy(TaskPointsEvent::getAssignmentId)).values()) {
-            List<TaskPointsEvent> sorted = cycle.stream()
+        for (List<TaskPointsEvent> assignmentEvents : events.stream().collect(Collectors.groupingBy(TaskPointsEvent::getAssignmentId)).values()) {
+            List<TaskPointsEvent> sorted = assignmentEvents.stream()
                 .sorted(Comparator.comparing(TaskPointsEvent::getOccurredAt).thenComparing(TaskPointsEvent::getId))
                 .toList();
+            List<List<TaskPointsEvent>> cycles = new ArrayList<>();
             for (TaskPointsEvent event : sorted) {
-                if (event.getEventType() == PointsEventType.COMPLETED || event.getEventType() == PointsEventType.FAILED) {
-                    result.add(event);
+                if (cycles.isEmpty() || event.getEventType() == PointsEventType.ASSIGNED) {
+                    cycles.add(new ArrayList<>());
                 }
+                cycles.get(cycles.size() - 1).add(event);
             }
-            TaskPointsEvent latest = sorted.get(sorted.size() - 1);
-            boolean stillOpen = latest.getEventType() == PointsEventType.ASSIGNED
-                || latest.getEventType() == PointsEventType.STRIKE_1
-                || latest.getEventType() == PointsEventType.STRIKE_2;
-            if (stillOpen) {
-                result.add(latest);
+            for (int i = 0; i < cycles.size(); i++) {
+                List<TaskPointsEvent> cycle = cycles.get(i);
+                TaskPointsEvent last = cycle.get(cycle.size() - 1);
+                if (last.getEventType() == PointsEventType.COMPLETED || last.getEventType() == PointsEventType.FAILED) {
+                    result.add(last);
+                } else if (i == cycles.size() - 1) {
+                    boolean stillOpen = last.getEventType() == PointsEventType.ASSIGNED
+                        || last.getEventType() == PointsEventType.STRIKE_1
+                        || last.getEventType() == PointsEventType.STRIKE_2
+                        || last.getEventType() == PointsEventType.REBASED;
+                    if (stillOpen && !draftTaskIds.contains(last.getTaskId())) {
+                        result.add(last);
+                    }
+                }
             }
         }
         return result;
     }
 
-    private List<TaskPointsEvent> countableEventsInRange(List<TaskPointsEvent> events, Instant from, Instant to) {
-        return countableEvents(events).stream()
+    private List<TaskPointsEvent> countableEventsInRange(List<TaskPointsEvent> events, Set<Long> draftTaskIds, Instant from, Instant to) {
+        return countableEvents(events, draftTaskIds).stream()
             .filter(e -> !e.getOccurredAt().isBefore(from) && e.getOccurredAt().isBefore(to))
             .toList();
     }
@@ -601,8 +635,8 @@ public class AnalyticsService {
     }
 
     /** Every active team member is listed even at zero points, so a quiet employee doesn't vanish from the leaderboard. */
-    private List<PointsLeaderboardEntry> buildPointsLeaderboard(List<TaskPointsEvent> allEvents, Instant from, Instant to) {
-        List<TaskPointsEvent> countable = countableEventsInRange(allEvents, from, to);
+    private List<PointsLeaderboardEntry> buildPointsLeaderboard(List<TaskPointsEvent> allEvents, Set<Long> draftTaskIds, Instant from, Instant to) {
+        List<TaskPointsEvent> countable = countableEventsInRange(allEvents, draftTaskIds, from, to);
         Map<Long, BigDecimal> earnedByUser = new LinkedHashMap<>();
         Map<Long, BigDecimal> possibleByUser = new LinkedHashMap<>();
         Map<Long, BigDecimal> lostByUser = new LinkedHashMap<>();
@@ -631,10 +665,10 @@ public class AnalyticsService {
     }
 
     /** Shared by the department "Team Efficiency Trend" (all employees' events) and the individual "Monthly Points Trend" (one employee's events) - identical bucketing math either way. */
-    private List<MonthlyRate> buildMonthlyRate(List<TaskPointsEvent> events) {
+    private List<MonthlyRate> buildMonthlyRate(List<TaskPointsEvent> events, Set<Long> draftTaskIds) {
         LocalDate trendStart = LocalDate.now().minusMonths(TREND_MONTHS - 1L).withDayOfMonth(1);
         Instant trendStartInstant = startOfDay(trendStart);
-        List<TaskPointsEvent> countable = countableEvents(events).stream()
+        List<TaskPointsEvent> countable = countableEvents(events, draftTaskIds).stream()
             .filter(e -> !e.getOccurredAt().isBefore(trendStartInstant))
             .toList();
 
@@ -659,8 +693,8 @@ public class AnalyticsService {
             .toList();
     }
 
-    private List<StrikeDistributionSlice> buildStrikeDistribution(List<TaskPointsEvent> allEvents, Instant from, Instant to) {
-        List<TaskPointsEvent> countable = countableEventsInRange(allEvents, from, to);
+    private List<StrikeDistributionSlice> buildStrikeDistribution(List<TaskPointsEvent> allEvents, Set<Long> draftTaskIds, Instant from, Instant to) {
+        List<TaskPointsEvent> countable = countableEventsInRange(allEvents, draftTaskIds, from, to);
         Map<String, Long> counts = new LinkedHashMap<>();
         for (String level : List.of("0", "1", "2", "FAILED")) counts.put(level, 0L);
         for (TaskPointsEvent event : countable) {
@@ -688,9 +722,13 @@ public class AnalyticsService {
                 if (!assignment.isCurrent()) continue;
                 TaskPointsEvent latest = latestByAssignment.get(assignment.getId());
                 if (latest == null) continue;
+                // REBASED carries forward whatever strike level the cycle was already at (never 3/FAILED -
+                // a resolved cycle is never rebased), so its ratio-based level is read the same way a
+                // resolved COMPLETED/FAILED event's is elsewhere - everything else here is explicitly 0.
                 int level = switch (latest.getEventType()) {
                     case STRIKE_1 -> 1;
                     case STRIKE_2 -> 2;
+                    case REBASED -> strikeLevelOf(latest);
                     default -> 0;
                 };
                 if (level == 0) continue;
@@ -703,8 +741,8 @@ public class AnalyticsService {
             .toList();
     }
 
-    private EmployeeReportResponse.PointsSummary buildPointsSummary(List<TaskPointsEvent> events, Instant from, Instant to) {
-        List<TaskPointsEvent> countable = countableEventsInRange(events, from, to);
+    private EmployeeReportResponse.PointsSummary buildPointsSummary(List<TaskPointsEvent> events, Set<Long> draftTaskIds, Instant from, Instant to) {
+        List<TaskPointsEvent> countable = countableEventsInRange(events, draftTaskIds, from, to);
         BigDecimal earned = countable.stream()
             .filter(e -> e.getEventType() == PointsEventType.COMPLETED)
             .map(TaskPointsEvent::getResultingPoints).reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -714,8 +752,8 @@ public class AnalyticsService {
         return new EmployeeReportResponse.PointsSummary(earned, possible, lost, efficiencyRate(earned, possible), failed);
     }
 
-    private List<EmployeeReportResponse.PointsBreakdownRow> buildPointsBreakdown(List<TaskPointsEvent> events, Instant from, Instant to) {
-        List<TaskPointsEvent> countable = countableEventsInRange(events, from, to);
+    private List<EmployeeReportResponse.PointsBreakdownRow> buildPointsBreakdown(List<TaskPointsEvent> events, Set<Long> draftTaskIds, Instant from, Instant to) {
+        List<TaskPointsEvent> countable = countableEventsInRange(events, draftTaskIds, from, to);
         Map<String, Long> counts = new LinkedHashMap<>();
         for (String level : List.of("FULL", "STRIKE_1", "STRIKE_2", "FAILED")) counts.put(level, 0L);
         for (TaskPointsEvent event : countable) {
@@ -762,7 +800,7 @@ public class AnalyticsService {
      * whatever its current state, so a still-open task shows up with its live "possible" value and
      * zero deducted, exactly like every other live-points surface in this report.
      */
-    private List<EmployeeReportResponse.TaskDetailRow> buildTaskDetails(Long employeeId, List<Task> tasksCreatedInRange, List<TaskPointsEvent> employeeAllEvents) {
+    private List<EmployeeReportResponse.TaskDetailRow> buildTaskDetails(Long employeeId, List<Task> tasksCreatedInRange, List<TaskPointsEvent> employeeAllEvents, Set<Long> draftTaskIds) {
         List<EmployeeReportResponse.TaskDetailRow> rows = new ArrayList<>();
         for (Task task : tasksCreatedInRange) {
             List<TaskAssignment> mine = task.getAssignments().stream()
@@ -779,7 +817,7 @@ public class AnalyticsService {
                 List<TaskPointsEvent> assignmentEvents = employeeAllEvents.stream()
                     .filter(e -> e.getAssignmentId().equals(assignment.getId()))
                     .toList();
-                BigDecimal deducted = countableEvents(assignmentEvents).stream()
+                BigDecimal deducted = countableEvents(assignmentEvents, draftTaskIds).stream()
                     .map(e -> e.getBasePoints().subtract(e.getResultingPoints()))
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
                 rows.add(new EmployeeReportResponse.TaskDetailRow(task.getId(), task.getTaskNumber(), task.getTitle(),
@@ -847,7 +885,7 @@ public class AnalyticsService {
             case FAILED -> "FAILED";
             case CANCELLED -> "CANCELLED";
             case REASSIGNED -> "REASSIGNED";
-            case ASSIGNED, STRIKE_1, STRIKE_2 -> "OPEN";
+            case ASSIGNED, STRIKE_1, STRIKE_2, REBASED -> "OPEN";
         };
 
         List<TaskPointsResponse.Event> events = history.stream()
@@ -856,6 +894,6 @@ public class AnalyticsService {
 
         return new TaskPointsResponse(task.getId(), task.getTaskNumber(), task.getTitle(), task.getPriority().name(),
             assignmentId, assignment.getUser().getId(), assignment.getUser().getName(),
-            history.get(0).getBasePoints(), latest.getResultingPoints(), outcome, events);
+            latest.getBasePoints(), latest.getResultingPoints(), outcome, events);
     }
 }

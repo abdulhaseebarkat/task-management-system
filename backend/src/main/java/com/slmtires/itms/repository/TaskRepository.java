@@ -1,6 +1,7 @@
 package com.slmtires.itms.repository;
 
 import com.slmtires.itms.entity.Task;
+import com.slmtires.itms.entity.TaskStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -30,4 +31,8 @@ public interface TaskRepository extends JpaRepository<Task, Long>, JpaSpecificat
     /** Atomic, so concurrent creates can never be issued the same task number. */
     @Query(value = "SELECT nextval('task_number_seq')", nativeQuery = true)
     long nextTaskNumber();
+
+    /** Cheap id-only lookup, independent of any analytics filter - used to keep still-Draft tasks (not yet real work, invisible to their assignee) out of points totals regardless of what the caller filtered on. */
+    @Query("select t.id from Task t where t.status = :status")
+    java.util.List<Long> findIdsByStatus(@org.springframework.data.repository.query.Param("status") TaskStatus status);
 }

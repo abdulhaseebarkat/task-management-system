@@ -42,7 +42,7 @@ export interface PointEventItem {
   taskNumber: string | null
   title: string
   assignmentId: number
-  eventType: "ASSIGNED" | "STRIKE_1" | "STRIKE_2" | "FAILED" | "COMPLETED" | "CANCELLED" | "REASSIGNED"
+  eventType: "ASSIGNED" | "STRIKE_1" | "STRIKE_2" | "FAILED" | "COMPLETED" | "CANCELLED" | "REASSIGNED" | "REBASED"
   pointsDelta: number
   resultingPoints: number
   reason: string | null

@@ -96,6 +96,7 @@ const EVENT_LABELS: Record<string, { text: string; tone: string }> = {
   CANCELLED: { text: "Cancelled · excluded from scoring", tone: "text-muted-foreground" },
   REASSIGNED: { text: "Reassigned away · excluded from scoring", tone: "text-muted-foreground" },
   ASSIGNED: { text: "Assigned · base value set", tone: "text-muted-foreground" },
+  REBASED: { text: "Priority changed · points re-based", tone: "text-muted-foreground" },
 }
 
 export function pointEventLabel(eventType: string): { text: string; tone: string } {

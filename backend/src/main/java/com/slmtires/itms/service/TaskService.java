@@ -150,6 +150,7 @@ public class TaskService {
         }
         Map<String, Object> before = snapshot(task);
         TaskStatus oldStatus = task.getStatus();
+        TaskPriority oldPriority = task.getPriority();
 
         // Filling in a due date the task never had (completing a DRAFT) is a plain field edit -
         // there's no prior deadline to record history against. Changing or clearing an EXISTING
@@ -161,6 +162,9 @@ public class TaskService {
         }
 
         applyFields(task, request, fillingInDueDate);
+        // Re-base any still-open assignment onto the new priority's points - otherwise "possible
+        // points" keeps reflecting whatever priority was in effect when that cycle started.
+        pointsService.recalculateBasePointsForPriorityChange(task, oldPriority);
         AssignmentChanges changes = replaceAssignments(task, request.safeAssigneeIds());
         lifecycleSupport.recalculate(task);
         // task is already managed (loaded above) and this may have added new
